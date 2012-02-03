@@ -78,4 +78,55 @@ class FakePlasticCriteriaTests extends GrailsUnitTestCase {
 		assert ['Green', 'Red'] == ls.collect{ it.color }
 	}
 	
+	void 'test Salvador Dali or Monet'(){
+		def plastic1 = new Plastic(name: 'Soleil levant')
+		def plastic2 = new Plastic(name: 'The Madonna of Port Lligat')
+		def plastic3 = new Plastic(name: "Les Demoiselles d'Avignon")
+		mockDomain(Plastic, [plastic1, plastic2, plastic3])
+		mockCriteria(Plastic)
+		def ls = Plastic.withCriteria{
+			or{
+				eq('name', 'Soleil levant')
+				eq('name', 'The Madonna of Port Lligat')
+			}
+		}
+		
+		assert [plastic1, plastic2] == ls
+	}
+	
+	void 'test Salvador Dali or Monet and price'(){
+		def plastic1 = new Plastic(name: 'Soleil levant', price: 10)
+		def plastic2 = new Plastic(name: 'The Madonna of Port Lligat', price: 11)
+		def plastic3 = new Plastic(name: "Les Demoiselles d'Avignon", price: 12)
+		mockDomain(Plastic, [plastic1, plastic2, plastic3])
+		mockCriteria(Plastic)
+		def ls = Plastic.withCriteria{
+			or{
+				eq('name', 'Soleil levant')
+				eq('name', 'The Madonna of Port Lligat')
+			}
+			lt('price', 11)
+		}
+		
+		assert [plastic1] == ls
+	}
+	
+	void 'test Salvador Dali or Monet and price 02'(){
+		def plastic1 = new Plastic(name: 'Soleil levant', price: 10)
+		def plastic2 = new Plastic(name: 'The Madonna of Port Lligat', price: 11)
+		def plastic3 = new Plastic(name: "Les Demoiselles d'Avignon", price: 11)
+		mockDomain(Plastic, [plastic1, plastic2, plastic3])
+		mockCriteria(Plastic)
+		def ls = Plastic.withCriteria{
+			or{
+				eq('name', 'Soleil levant')
+				and{
+					eq('name', 'The Madonna of Port Lligat')
+					eq('price', 11)
+				}
+			}
+		}
+		
+		assert [plastic1, plastic2] == ls
+	}
 }

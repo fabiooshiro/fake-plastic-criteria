@@ -6,4 +6,7 @@ class Plastic{
 	
 	BigDecimal price;
 	
+	String toString(){
+		name
+	}
 }

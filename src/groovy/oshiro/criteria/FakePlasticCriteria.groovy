@@ -13,17 +13,37 @@ package oshiro.criteria;
  */
 class FakePlasticCriteria {
 	
-	def clazz
-	def maxRes
-	def comparatorsMethods = ['le', 'ne', 'lt', 'gt', 'ge', 'eq', 'in', 'isNull', 'isNotNull', 'ilike']
-	def comparatorsMaps = [:]
-	def props = []
-	def groupProps = []
-	def orders = []
-	def distinctProp 
+	def _clazz
+	def _maxRes
+	def _props = []
+	def _groupProps = []
+	def _orders = []
+	def _distinctProp
+	def _leCriticalList = [tp: 'and', ls: []]
+	def _prefix = ''
+	
+	def _instanceValue
+	
+	def _criteriaValue
+	def theImplementations = [
+		'le':{ _instanceValue <= _criteriaValue },
+		'lt':{ _instanceValue  < _criteriaValue },
+		'gt':{ _instanceValue  > _criteriaValue },
+		'ge':{ _instanceValue >= _criteriaValue },
+		'eq':{ _instanceValue == _criteriaValue },
+		'in':{ _instanceValue in _criteriaValue },
+		'ne':{ _instanceValue != _criteriaValue },
+		'ilike':{ ('' + _instanceValue).toLowerCase() ==~ _criteriaValue.replace('%','.*').toLowerCase() },
+		'isNull':{ _instanceValue == null },
+		'isNotNull':{ _instanceValue != null }
+	]
 	
 	public FakePlasticCriteria(clazz){
-		this.clazz = clazz
+		this._clazz = clazz
+	}
+	
+	public FakePlasticCriteria(clazz, pref){
+		_prefix = pref + '.'
 	}
 	
 	static void mockCriteria(clazz){
@@ -40,28 +60,28 @@ class FakePlasticCriteria {
 	}
 	
 	def maxResults(limit){
-		maxRes = limit
+		_maxRes = limit
 	}
 	
 	def distinct(prop){
-		distinctProp = prop
+		_distinctProp = prop
 	}
 	
 	def property(prop){
-		props.add(prop)
+		_props.add(prop)
 	}
 	
 	def sum(prop){
-		props.add("sum $prop")
+		_props.add("sum $prop")
 	}
 	
 	def avg(prop){
-		props.add("avg $prop")
+		_props.add("avg $prop")
 	}
 	
 	def groupProperty(prop){
-		groupProps.add(prop)
-		props.add(prop)
+		_groupProps.add(prop)
+		_props.add(prop)
 	}
 	
 	def projections(clos){
@@ -70,39 +90,51 @@ class FakePlasticCriteria {
 	}
 	
 	def order(prop, order){
-		orders.add("${prop} ${order}")
+		_orders.add("${prop} ${order}")
 	}
 	
 	def methodMissing(String name, args){
-		if(comparatorsMethods.contains(name)){
-			comparatorsMaps.get(name, [:]).put(args[0], (args.length > 1) ? args[1] : 'null')
+		if(theImplementations.containsKey(name)){
+			_leCriticalList.ls.add([cp: name, prop: _prefix + args[0], val: ((args.length > 1) ? args[1] : 'null')])
 		}else{
-			def fc = new FakePlasticCriteria(this.clazz)
 			if(!(args[0] instanceof Closure)) throw new RuntimeException("metodo ${name} nao foi implementado")
+			def fc = new FakePlasticCriteria(this._clazz, name)
 			args[0].resolveStrategy = Closure.DELEGATE_FIRST
 			args[0].delegate = fc
 			args[0]()
-			fc.comparatorsMaps.each{ k, v ->
-				v.each{ sk, sv ->
-					this.comparatorsMaps.get(k, [:]).put("${name}."+sk, sv)
-				}
+			fc._leCriticalList.ls.each{ v ->
+				this._leCriticalList.ls.add(v)
 			}
 		}
 	}
 	
-	def or(clos){
+	def and(clos){
+		def thePersistenceOfMemory = _leCriticalList
+		_leCriticalList = [tp: 'and', ls: []]
+		thePersistenceOfMemory.ls.add(_leCriticalList)
+		clos.delegate = this
+		clos()
+		_leCriticalList = thePersistenceOfMemory
+	}
 	
+	def or(clos){
+		def thePersistenceOfMemory = _leCriticalList
+		_leCriticalList = [tp: 'or', ls: []]
+		thePersistenceOfMemory.ls.add(_leCriticalList)
+		clos.delegate = this
+		clos()
+		_leCriticalList = thePersistenceOfMemory
 	}
 	
 	def list(clos){
 		clos.delegate = this
 		clos()
 		def ls = filteredList()
-		if(props){
+		if(_props){
 			def rs = []
 			def extractProps = { vls ->
 				def rsItem = []
-				props.each{ prop ->
+				_props.each{ prop ->
 					if(prop.startsWith('sum ')){
 						rsItem.add(vls.sum(0.0){it."${prop.substring(4)}"})
 					}else if(prop.startsWith('avg ')){
@@ -113,11 +145,11 @@ class FakePlasticCriteria {
 						rsItem.add(gp)
 					}
 				}
-				rs.add(props.size() == 1 ? rsItem[0] : rsItem)
+				rs.add(_props.size() == 1 ? rsItem[0] : rsItem)
 			}
-			if(groupProps){
+			if(_groupProps){
 				ls.groupBy{ item ->
-					groupProps.collect{ groupProp ->
+					_groupProps.collect{ groupProp ->
 						def gp = item
 						groupProp.split('\\.').each{ gp = gp."$it" }
 						return gp
@@ -129,47 +161,52 @@ class FakePlasticCriteria {
 				extractProps(ls)
 			}
 			ls = rs
-		} else if(distinctProp){
+		} else if(_distinctProp){
 			def rs = []
 			ls.each{
-				if(!rs.contains(it."$distinctProp")) rs.add(it."$distinctProp")
+				if(!rs.contains(it."$_distinctProp")) rs.add(it."$_distinctProp")
 			}
 			ls = rs
 		}
 		return ls
 	}
 	
+	def whereIsMyMind(criList, obj){
+		if(criList.tp == 'and'){
+			return !criList.ls.any{ cri ->
+				if(cri.cp){
+					_criteriaValue = cri.val
+					_instanceValue = obj
+					cri.prop.split('\\.').each{ _instanceValue = it == 'class' ? _instanceValue.class.name : _instanceValue."$it"	}
+					return !theImplementations[cri.cp]()
+				}else{
+					return !whereIsMyMind(cri, obj)
+				}
+			}
+		} else if(criList.tp == 'or'){
+			return criList.ls.any{ cri ->
+				if(cri.cp){
+					_criteriaValue = cri.val
+					_instanceValue = obj
+					cri.prop.split('\\.').each{ _instanceValue = it == 'class' ? _instanceValue.class.name : _instanceValue."$it"	}
+					return theImplementations[cri.cp]()
+				}else{
+					return whereIsMyMind(cri, obj)
+				}
+			}
+		} else{
+			throw new RuntimeException("Foo bar")
+		}
+	}
+
 	def filteredList(){
 		def r = []
-		def currentObj
-		def oVal
-		def cVal
-		def doCrit = { op, cls -> 
-			!comparatorsMaps[op]?.any{ prop, val ->
-				cVal = val
-				oVal = currentObj
-				prop.split('\\.').each{ oVal = it == 'class' ? oVal.class.name : oVal."$it"	}
-				!cls() 
-			}
-		}
-		clazz.list().each{ obj ->
-			currentObj = obj
-			if(
-				doCrit('le'){ oVal <= cVal } &&
-				doCrit('lt'){ oVal  < cVal } &&
-				doCrit('gt'){ oVal  > cVal } &&
-				doCrit('ge'){ oVal >= cVal } &&
-				doCrit('eq'){ oVal == cVal } && 
-				doCrit('in'){ oVal in cVal } &&
-				doCrit('ne'){ oVal != cVal } &&
-				doCrit('ilike'){ ('' + oVal).toLowerCase() ==~ cVal.replace('%','.*').toLowerCase() } &&
-				doCrit('isNull'){ oVal == null } &&
-				doCrit('isNotNull'){ oVal != null }
-			){
+		_clazz.list().each{ obj ->
+			if(whereIsMyMind(_leCriticalList, obj)){
 				r.add(obj)
 			}
 		}
-		orders.each{
+		_orders.each{
 			def arr = it.split(' ')
 			def prop = arr[0]
 			def order = arr[1]
@@ -193,3 +230,4 @@ class FakePlasticCriteria {
 		return ls ? ls.first() : null
 	}
 }
+
